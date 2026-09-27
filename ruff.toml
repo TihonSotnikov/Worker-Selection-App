@@ -1,0 +1,15 @@
+line-length = 120
+target-version = "py311"
+
+[lint]
+# E: pycodestyle, F: Pyflakes, I: isort, N: naming, UP: pyupgrade, B: flake8-bugbear
+select = ["E", "F", "I", "N", "UP", "B"]
+ignore = [
+    "D100", "D104", 
+    "B008", # Допускаем вызовы функций в аргументах (FastAPI Depends/File)
+    "E402", # Допускаем импорты не в начале (нужно для os.environ в тестах)
+]
+
+[format]
+quote-style = "double"
+indent-style = "space"
