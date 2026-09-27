@@ -1,28 +1,46 @@
-import torch
-from faster_whisper import WhisperModel
+"""
+Расшифровка аудио (STT) через faster-whisper.
 
-device = "cuda:0" if torch.cuda.is_available() else "cpu"
-# device = "cpu"
-dtype = torch.float16 if torch.cuda.is_available() else torch.float32
-# dtype = torch.float32
+Модель загружается один раз при первом обращении и дальше переиспользуется.
+Встроенный VAD режет длинные записи на фрагменты речи, поэтому ограничений
+на длину файла нет.
+"""
+
+import logging
+import re
+import threading
+
+logger = logging.getLogger(__name__)
+
+# Whisper на паузах иногда «дописывает» фразы из субтитров, на которых учился.
+HALLUCINATIONS = re.compile(
+    r"(продолжение следует|субтитры (сделал|создавал|подготовил)\w*.*|редактор субтитров.*|"
+    r"спасибо за просмотр|подписывайтесь на канал)[.!…]*",
+    re.IGNORECASE,
+)
+
+
+def clean_transcript(text: str) -> str:
+    return re.sub(r"\s{2,}", " ", HALLUCINATIONS.sub("", text)).strip()
 
 
 class Transcriber:
-    def __init__(self, model_name: str, *args, **kwargs):
-        self._model = WhisperModel(model_name)
-        # self._pipeline = pipeline(
-        #     "automatic-speech-recognition",
-        #     model=model_name,
-        #     dtype=dtype,
-        #     device=device,
-        #     *args,
-        #     **kwargs
-        # )
+    def __init__(self, model_name: str):
+        self.model_name = model_name
+        self._model = None
+        self._lock = threading.Lock()
 
-    def __call__(self, *args, **kwds):
-        return self._model.transcribe(*args, **kwds)
-        # return self._pipeline(*args, **kwds)
+    def _get_model(self):
+        with self._lock:
+            if self._model is None:
+                from faster_whisper import WhisperModel
 
+                logger.info("Loading STT model %s...", self.model_name)
+                self._model = WhisperModel(self.model_name, device="cpu", compute_type="int8")
+            return self._model
 
-# "deepdml/faster-whisper-large-v3-turbo-ct2"
-# "medium"
+    def transcribe(self, path: str) -> str:
+        segments, _ = self._get_model().transcribe(
+            path, language="ru", vad_filter=True, beam_size=1, condition_on_previous_text=False
+        )
+        return clean_transcript(" ".join(segment.text.strip() for segment in segments))

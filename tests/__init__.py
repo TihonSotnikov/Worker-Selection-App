@@ -1,1 +1,1 @@
-"""Tests module for the genai-project."""
+"""Тесты Worker Selection App."""

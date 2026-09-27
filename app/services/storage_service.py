@@ -1,72 +1,106 @@
-import json
+"""
+Работа с БД: вакансии, кандидаты, заполнение демо-данными.
+"""
 
+import logging
+import random
+
+from sqlalchemy import func
 from sqlmodel import Session, select
 
-from app.api.models_db import CandidateTable
-from app.core.enums import ShiftPreference
-from app.core.schemas import CandidateResult, CandidateVector
+from app.api.models_db import CandidateTable, VacancyTable
+from app.core.enums import CandidateSource, Profession
+from app.core.schemas import CandidateOut, CandidateProfile, VacancyData, VacancyOut
+from app.ml.generator import generate_pool
+from app.services.demo_data import DEMO_VACANCIES
+
+logger = logging.getLogger(__name__)
+
+
+def _vacancy_out(row: VacancyTable, candidates_total: int = 0) -> VacancyOut:
+    return VacancyOut(id=row.id, candidates_total=candidates_total, **row.data)
+
+
+def _candidate_out(row: CandidateTable) -> CandidateOut:
+    return CandidateOut(
+        id=row.id,
+        created_at=row.created_at,
+        source=CandidateSource(row.source),
+        vacancy_id=row.vacancy_id,
+        profile=CandidateProfile.model_validate(row.profile),
+        transcript=row.transcript,
+    )
+
+
+def _counts_by_profession(session: Session) -> dict[str, int]:
+    rows = session.exec(select(CandidateTable.profession, func.count()).group_by(CandidateTable.profession)).all()
+    return dict(rows)
+
+
+def list_vacancies(session: Session) -> list[VacancyOut]:
+    counts = _counts_by_profession(session)
+    rows = session.exec(select(VacancyTable).order_by(VacancyTable.id)).all()
+    return [_vacancy_out(row, counts.get(row.profession, 0)) for row in rows]
+
+
+def get_vacancy(session: Session, vacancy_id: int) -> VacancyOut | None:
+    row = session.get(VacancyTable, vacancy_id)
+    if row is None:
+        return None
+    return _vacancy_out(row, _counts_by_profession(session).get(row.profession, 0))
+
+
+def list_candidates(session: Session, profession: Profession | None = None) -> list[CandidateOut]:
+    query = select(CandidateTable).order_by(CandidateTable.id)
+    if profession is not None:
+        query = query.where(CandidateTable.profession == profession.value)
+    return [_candidate_out(row) for row in session.exec(query).all()]
+
+
+def get_candidate(session: Session, candidate_id: int) -> CandidateOut | None:
+    row = session.get(CandidateTable, candidate_id)
+    return _candidate_out(row) if row else None
 
 
 def save_candidate(
     session: Session,
-    full_name: str,
-    raw_summary: str,
-    retention_score: float,
-    risk_factors: list[str],
-    vector: CandidateVector,
+    profile: CandidateProfile,
+    source: CandidateSource,
+    vacancy_id: int | None = None,
+    transcript: str | None = None,
+    commit: bool = True,
 ) -> CandidateTable:
-    """Сохраняет 12 признаков кандидата."""
-    db_candidate = CandidateTable(
-        full_name=full_name,
-        raw_summary=raw_summary,
-        retention_score=retention_score,
-        risk_factors=json.dumps(risk_factors, ensure_ascii=False),
-        vec_skills_count=vector.skills_verified_count,
-        vec_years_experience=vector.years_experience,
-        vec_age=vector.age,
-        vec_commute_minutes=vector.commute_time_minutes,
-        vec_shift_preference=int(vector.shift_preference),
-        vec_salary_expectation=vector.salary_expectation,
-        vec_has_certifications=vector.has_certifications,
-        vec_education_level=vector.education_level,
-        vec_previous_turnovers=vector.previous_turnovers,
-        vec_family_status=vector.family_status,
-        vec_housing_type=vector.housing_type,
-        vec_has_transport=vector.has_transport,
+    row = CandidateTable(
+        source=source.value,
+        profession=profile.profession.value,
+        full_name=profile.full_name,
+        vacancy_id=vacancy_id,
+        transcript=transcript,
+        profile=profile.model_dump(mode="json"),
     )
-    session.add(db_candidate)
+    session.add(row)
+    if commit:
+        session.commit()
+        session.refresh(row)
+    return row
+
+
+def save_vacancy(session: Session, data: VacancyData) -> VacancyTable:
+    row = VacancyTable(profession=data.profession.value, data=data.model_dump(mode="json"))
+    session.add(row)
+    return row
+
+
+def seed_demo_data(session: Session, seed: int) -> None:
+    """Заполняет пустую БД демо-вакансиями и синтетическими кандидатами (детерминированно)."""
+
+    if session.exec(select(VacancyTable.id).limit(1)).first() is not None:
+        return
+    for vacancy in DEMO_VACANCIES:
+        save_vacancy(session, vacancy)
+    rng = random.Random(seed)
+    for profession in Profession:
+        for profile in generate_pool(rng, profession):
+            save_candidate(session, profile, CandidateSource.SYNTHETIC, commit=False)
     session.commit()
-    session.refresh(db_candidate)
-    return db_candidate
-
-
-def get_all_candidates(session: Session) -> list[CandidateResult]:
-    """Загружает кандидатов с 12 признаками."""
-    candidates = session.exec(select(CandidateTable).order_by(CandidateTable.created_at.desc())).all()
-    results = []
-    for db in candidates:
-        vector = CandidateVector(
-            skills_verified_count=db.vec_skills_count,
-            years_experience=db.vec_years_experience,
-            age=db.vec_age,
-            commute_time_minutes=db.vec_commute_minutes,
-            shift_preference=ShiftPreference(db.vec_shift_preference),
-            salary_expectation=db.vec_salary_expectation,
-            has_certifications=db.vec_has_certifications,
-            education_level=db.vec_education_level,
-            previous_turnovers=db.vec_previous_turnovers,
-            family_status=db.vec_family_status,
-            housing_type=db.vec_housing_type,
-            has_transport=db.vec_has_transport,
-        )
-        results.append(
-            CandidateResult(
-                id=str(db.id),
-                full_name=db.full_name,
-                raw_summary=db.raw_summary,
-                vector=vector,
-                retention_score=db.retention_score,
-                risk_factors=json.loads(db.risk_factors),
-            )
-        )
-    return results
+    logger.info("Seeded %d vacancies and synthetic candidates", len(DEMO_VACANCIES))

@@ -1,10 +1,11 @@
 .git
+.github
 .venv
 __pycache__
 *.pyc
 .DS_Store
-Worker_Selection_App.db
-genai-project/Worker_Selection_App.db
-catboost_info
-data/*.csv
-!data/train_dataset.csv
+.pytest_cache
+.ruff_cache
+.env
+data
+tests

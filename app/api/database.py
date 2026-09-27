@@ -4,40 +4,22 @@ from sqlmodel import Session, SQLModel, create_engine
 
 from app.core.config import settings
 
-# check_same_thread=False необходим для SQLite при работе с FastAPI,
-# так как каждый запрос обрабатывается в отдельном потоке.
-connect_args = {"check_same_thread": False}
-
-engine = create_engine(
-    settings.DATABASE_URL,
-    echo=False,
-    connect_args=connect_args,  # Снижение шума логов.
-)
+# check_same_thread=False нужен SQLite: FastAPI обрабатывает запросы в разных потоках.
+_connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
+engine = create_engine(settings.database_url, echo=False, connect_args=_connect_args)
 
 
 def init_db() -> None:
-    """
-    Синхронное создание таблиц.
-    Должно вызываться при старте приложения (main.py @app.on_event("startup")).
-    """
+    """Создаёт каталог данных и таблицы."""
+
+    settings.DATA_DIR.mkdir(parents=True, exist_ok=True)
+    from app.api import models_db  # noqa: F401  — регистрирует таблицы в metadata
 
     SQLModel.metadata.create_all(engine)
 
 
 def get_session() -> Generator[Session, None, None]:
-    """
-    Генератор-сессия для Dependency Injection в FastAPI.
-
-    Обеспечивает:
-        - отдельную транзакцию на каждый HTTP-запрос,
-        - автоматическое закрытие сессии после обработки запроса,
-        - корректную работу с SQLite в многопоточном режиме.
-
-    Yields
-    ------
-    Session
-        Активная сессия SQLAlchemy/SQLModel, привязанная к текущему запросу.
-    """
+    """Сессия БД на время одного HTTP-запроса."""
 
     with Session(engine) as session:
         yield session
