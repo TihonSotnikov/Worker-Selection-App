@@ -1,43 +1,96 @@
-from enum import IntEnum
+from enum import StrEnum
 
 
-class ShiftPreference(IntEnum):
-    """
-    Предпочтения кандидата по графику работы.
+class Profession(StrEnum):
+    """Профессии, на которых сфокусирован MVP (отрасль — машиностроение)."""
 
-    Используется для ML-моделирования совместимости.
-
-    Attributes
-    ----------
-    DAY_ONLY : int
-        Предпочтительны только дневные смены.
-    NIGHT_ONLY : int
-        Предпочтительны только ночные смены.
-    ANY : int
-        Готовность работать в любое время.
-    """
-
-    DAY_ONLY = 0
-    NIGHT_ONLY = 1
-    ANY = 2
+    CNC = "cnc_operator"
+    WELDER = "welder"
+    ELECTRO = "electromechanic"
 
 
-class RiskLevel(IntEnum):
-    """
-    Уровень риска увольнения сотрудника (Retention Risk).
+class CertKind(StrEnum):
+    """Виды удостоверений, которые проверяются на интервью."""
 
-    Рассчитывается ML-моделью на основе совокупности факторов.
+    GRADE = "grade"
+    NAKS = "naks"
+    ELSAFETY = "elsafety"
+    SLINGER = "slinger"
 
-    Attributes
-    ----------
-    LOW : int
-        Низкий риск (скорее всего останется).
-    MEDIUM : int
-        Средний риск.
-    HIGH : int
-        Высокий риск (скорее всего уволится).
-    """
 
-    LOW = 0
-    MEDIUM = 1
-    HIGH = 2
+class ShiftSchedule(StrEnum):
+    """График работы на вакансии."""
+
+    DAY = "day"
+    NIGHT = "night"
+    ROTATING = "rotating"
+
+
+class ShiftPreference(StrEnum):
+    """Отношение кандидата к сменам."""
+
+    DAY_ONLY = "day_only"
+    ANY = "any"
+    NIGHT = "night"
+    UNKNOWN = "unknown"
+
+
+class TeamFormat(StrEnum):
+    """Формат работы на вакансии."""
+
+    TEAM = "team"
+    SOLO = "solo"
+    MIXED = "mixed"
+
+
+class TeamPreference(StrEnum):
+    """Как кандидату комфортнее работать."""
+
+    TEAM = "team"
+    SOLO = "solo"
+    ANY = "any"
+    UNKNOWN = "unknown"
+
+
+class Amenity(StrEnum):
+    """Бытовые условия на производстве."""
+
+    CANTEEN = "canteen"
+    SHOWER = "shower"
+    DORMITORY = "dormitory"
+    SHUTTLE = "shuttle"
+
+
+class Zone(StrEnum):
+    """Районы условного города, между которыми считается время в пути."""
+
+    CENTER = "center"
+    LEFT_BANK = "left_bank"
+    NORTH = "north"
+    SOUTH = "south"
+    SUBURB = "suburb"
+
+
+class CandidateSource(StrEnum):
+    """Откуда в системе появился кандидат."""
+
+    SYNTHETIC = "synthetic"
+    INTERVIEW = "interview"
+    UPLOAD = "upload"
+
+
+class CheckStatus(StrEnum):
+    """Результат проверки одного требования или условия."""
+
+    OK = "ok"
+    PARTIAL = "partial"
+    MISSING = "missing"
+    UNKNOWN = "unknown"
+
+
+class RiskLevel(StrEnum):
+    """Уровень риска увольнения в первые 90 дней."""
+
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"

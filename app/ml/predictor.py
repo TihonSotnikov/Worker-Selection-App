@@ -1,150 +1,128 @@
-import os
-import pickle
-from typing import Any
+"""
+Модель удержания: CatBoost на признаках пары «кандидат × вакансия».
 
-import catboost as cb
-import pandas as pd
-from sklearn.metrics import roc_auc_score
-from sklearn.model_selection import train_test_split
+Объяснения строятся на SHAP-значениях CatBoost: для каждого прогноза видно,
+на сколько процентных пунктов каждый признак сдвинул вероятность.
+"""
 
-from app.ml.feature_contract import FEATURE_COLS, FEATURE_DEFAULTS
+import json
+import logging
+import math
+import random
+from datetime import UTC, datetime
+from pathlib import Path
 
-CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_MODEL_PATH = os.path.join(CURRENT_DIR, "model.pkl")
-PROJECT_ROOT = os.path.dirname(os.path.dirname(CURRENT_DIR))
-DEFAULT_DATA_PATH = os.path.join(PROJECT_ROOT, "data", "train_dataset.csv")
+from catboost import CatBoostClassifier, Pool
+from catboost.utils import eval_metric
+
+from app.ml.feature_contract import FEATURE_COLS, MONOTONE
+from app.ml.generator import generate_training_data
+
+logger = logging.getLogger(__name__)
+
+MODEL_VERSION = 2
 
 
-class RetentionPredictor:
-    """
-    ML Модель для предсказания удержания кандидата.
-    """
+def _sigmoid(x: float) -> float:
+    return 1 / (1 + math.exp(-x))
 
-    def __init__(self):
-        self.model = None
-        self.feature_names = None
-        self._prediction_cache = {}
-        self._explain_cache = {}
-        self._positive_cache = {}
 
-    def _map_risk_level(self, retention_probability: float) -> str:
-        if retention_probability >= 0.7:
-            return "LOW"
-        if retention_probability >= 0.4:
-            return "MEDIUM"
-        return "HIGH"
+class RetentionModel:
+    def __init__(self, model: CatBoostClassifier, meta: dict):
+        self._model = model
+        self.meta = meta
 
-    def _detect_requires_review(self, features: dict) -> bool:
-        return features.get("years_experience", 0) <= 0
+    @classmethod
+    def train(cls, rows: int, seed: int) -> "RetentionModel":
+        x, y = generate_training_data(rows, seed)
+        indices = list(range(rows))
+        random.Random(seed).shuffle(indices)
+        split = int(rows * 0.8)
+        train_idx, test_idx = indices[:split], indices[split:]
 
-    def _estimate_uncertainty_band(
-        self,
-        retention_probability: float,
-        features: dict,
-        requires_review: bool = False,
-    ) -> dict:
-        if requires_review:
-            margin = 0.12
-        elif 0.4 <= retention_probability < 0.7:
-            margin = 0.08
-        elif retention_probability < 0.4:
-            margin = 0.06
-        else:
-            margin = 0.05
-
-        return {
-            "uncertainty_low": max(0.0, retention_probability - margin),
-            "uncertainty_high": min(1.0, retention_probability + margin),
-            "uncertainty_margin": margin,
-            "uncertainty_note": "Ориентировочный коридор неопределённости.",
-        }
-
-    def _prepare_feature_df(self, features: dict) -> pd.DataFrame:
-        features = {**FEATURE_DEFAULTS, **dict(features)}
-        return pd.DataFrame([features])[self.feature_names]
-
-    def _rule_based_weighted_risks(self, features: dict) -> list[str]:
-        features = {**FEATURE_DEFAULTS, **dict(features)}
-        scored_risks = []
-
-        def add(condition: bool, weight: float, text: str):
-            if condition:
-                scored_risks.append((weight, text))
-
-        add(features.get("years_experience", 0) <= 0, 3.5, "Требуется уточнение опыта")
-        add(features.get("commute_time_minutes", 0) > 120, 3.0, "Очень длинная дорога до работы")
-        add(features.get("previous_turnovers", 0) > 3, 3.2, "Частая смена прошлых мест работы")
-
-        scored_risks.sort(key=lambda x: x[0], reverse=True)
-        return [text for _, text in scored_risks][:3]
-
-    def train_model(self, data_path: str = DEFAULT_DATA_PATH) -> Any:
-        df = pd.read_csv(data_path)
-        feature_cols = FEATURE_COLS
-        x = df[feature_cols]
-        y = df["retention"]
-        self.feature_names = feature_cols
-
-        x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.2, random_state=42, stratify=y)
-
-        self.model = cb.CatBoostClassifier(
+        model = CatBoostClassifier(
             iterations=500,
-            depth=6,
-            learning_rate=0.1,
-            loss_function="Logloss",
+            depth=5,
+            learning_rate=0.05,
+            l2_leaf_reg=3,
+            random_seed=seed,
+            monotone_constraints=[MONOTONE[col] for col in FEATURE_COLS],
             verbose=False,
-            random_state=42,
             allow_writing_files=False,
         )
-        self.model.fit(x_train, y_train, eval_set=(x_test, y_test))
+        model.fit(
+            Pool([x[i] for i in train_idx], [y[i] for i in train_idx], feature_names=FEATURE_COLS),
+        )
 
-        y_pred_proba = self.model.predict_proba(x_test)[:, 1]
-        print(f"ROC-AUC: {roc_auc_score(y_test, y_pred_proba):.3f}")
-        return self.model
+        test_pool = Pool([x[i] for i in test_idx], feature_names=FEATURE_COLS)
+        probs = model.predict_proba(test_pool)[:, 1]
+        roc_auc = eval_metric([y[i] for i in test_idx], probs, "AUC")[0]
 
-    def predict_retention(self, features: dict) -> dict:
-        if self.model is None:
-            raise ValueError("Model is not loaded.")
-        feature_df = self._prepare_feature_df(features)
-        retention_prob = float(self.model.predict_proba(feature_df)[0, 1])
-        requires_review = self._detect_requires_review(features)
-        risk_level = "MEDIUM" if requires_review else self._map_risk_level(retention_prob)
-
-        uncertainty = self._estimate_uncertainty_band(retention_prob, features, requires_review)
-        return {
-            "retention_probability": retention_prob,
-            "will_stay": bool(retention_prob > 0.5),
-            "risk_level": risk_level,
-            "requires_review": requires_review,
-            **uncertainty,
+        importance = dict(zip(FEATURE_COLS, model.get_feature_importance().tolist(), strict=True))
+        meta = {
+            "version": MODEL_VERSION,
+            "features": FEATURE_COLS,
+            "rows": rows,
+            "seed": seed,
+            "roc_auc": round(float(roc_auc), 3),
+            "baseline_retention": round(sum(y) / len(y), 3),
+            "trained_at": datetime.now(UTC).isoformat(timespec="seconds"),
+            "importance": {k: round(v, 1) for k, v in sorted(importance.items(), key=lambda kv: -kv[1])},
         }
+        logger.info("Retention model trained: ROC-AUC=%.3f on %d rows", roc_auc, rows)
+        return cls(model, meta)
 
-    def explain_prediction(self, features: dict) -> list[str]:
-        return self._rule_based_weighted_risks(features)
+    def save(self, model_path: Path, meta_path: Path) -> None:
+        model_path.parent.mkdir(parents=True, exist_ok=True)
+        self._model.save_model(str(model_path))
+        meta_path.write_text(json.dumps(self.meta, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    def explain_positive_factors(self, features: dict) -> list[str]:
-        positives = []
-        if features.get("skills_verified_count", 0) >= 7:
-            positives.append("Много подтверждённых навыков")
-        return positives[:3]
+    @classmethod
+    def load(cls, model_path: Path, meta_path: Path) -> "RetentionModel | None":
+        if not model_path.exists() or not meta_path.exists():
+            return None
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        if meta.get("version") != MODEL_VERSION or meta.get("features") != FEATURE_COLS:
+            logger.info("Saved retention model is outdated, retraining")
+            return None
+        model = CatBoostClassifier()
+        model.load_model(str(model_path))
+        return cls(model, meta)
 
-    def save_model(self, path: str = DEFAULT_MODEL_PATH) -> None:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "wb") as f:
-            pickle.dump({"model": self.model, "feature_names": self.feature_names}, f)
+    @classmethod
+    def load_or_train(cls, model_path: Path, meta_path: Path, rows: int, seed: int) -> "RetentionModel":
+        model = cls.load(model_path, meta_path)
+        if model is None:
+            model = cls.train(rows, seed)
+            model.save(model_path, meta_path)
+        return model
 
-    def load_model(self, path: str = DEFAULT_MODEL_PATH) -> bool:
-        if not os.path.exists(path):
-            return False
-        with open(path, "rb") as f:
-            data = pickle.load(f)
-        self.model = data["model"]
-        self.feature_names = data["feature_names"]
-        return True
+    def _pool(self, rows: list[dict[str, float]]) -> Pool:
+        return Pool([[float(r[col]) for col in FEATURE_COLS] for r in rows], feature_names=FEATURE_COLS)
 
+    def predict(self, rows: list[dict[str, float]]) -> list[float]:
+        if not rows:
+            return []
+        return [float(p) for p in self._model.predict_proba(self._pool(rows))[:, 1]]
 
-def train_if_needed() -> None:
-    model = RetentionPredictor()
-    if not model.load_model(DEFAULT_MODEL_PATH):
-        model.train_model(DEFAULT_DATA_PATH)
-        model.save_model(DEFAULT_MODEL_PATH)
+    def explain(self, rows: list[dict[str, float]]) -> list[dict[str, float]]:
+        """
+        Вклад каждого признака в прогноз, в процентных пунктах вероятности удержания.
+
+        SHAP-значения CatBoost аддитивны в логитах. Чтобы вклады в процентах тоже
+        складывались, они масштабируются секущей сигмоиды между средним прогнозом
+        (base) и прогнозом кандидата: сумма вкладов = p(кандидат) − p(средний).
+        Знак каждого вклада сохраняется, потому что сигмоида монотонна.
+        """
+
+        if not rows:
+            return []
+        shap = self._model.get_feature_importance(data=self._pool(rows), type="ShapValues")
+        result = []
+        for row in shap:
+            base = float(row[-1])
+            delta_logit = float(row[:-1].sum())
+            p_base, p_full = _sigmoid(base), _sigmoid(base + delta_logit)
+            slope = (p_full - p_base) / delta_logit if abs(delta_logit) > 1e-6 else p_base * (1 - p_base)
+            result.append({col: round(float(row[i]) * slope * 100, 1) for i, col in enumerate(FEATURE_COLS)})
+        return result
