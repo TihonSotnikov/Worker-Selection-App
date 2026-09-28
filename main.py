@@ -45,7 +45,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Worker Selection App",
     description="Подбор промышленных рабочих: интервью, проверка навыков, шорт-лист с прогнозом удержания",
-    version="0.2.0",
+    version="2.0.0",
     lifespan=lifespan,
 )
 app.include_router(api_router, prefix="/api")
