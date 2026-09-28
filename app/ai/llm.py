@@ -71,6 +71,8 @@ class OllamaClient:
             raise LLMUnavailableError("Ollama не запущена. Запустите: brew services start ollama") from e
         except httpx.TimeoutException as e:
             raise LLMError(f"LLM не ответила за {self.timeout:.0f} с") from e
+        except httpx.HTTPError as e:
+            raise LLMError(f"Соединение с Ollama прервано: {e}") from e
 
         if response.status_code == 404:
             raise LLMUnavailableError(f"Модель не скачана. Выполните: ollama pull {self.model}")
