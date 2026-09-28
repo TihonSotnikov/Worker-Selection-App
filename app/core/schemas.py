@@ -3,8 +3,9 @@ Pydantic-схемы предметной области и ответов API.
 """
 
 from datetime import datetime
+from typing import Annotated
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
 from app.core.enums import (
     Amenity,
@@ -211,7 +212,7 @@ class InterviewOut(BaseModel):
 
 
 class AnswerIn(BaseModel):
-    text: str = Field(..., min_length=1, max_length=4000)
+    text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4000)]
 
 
 class InterviewCreateIn(BaseModel):

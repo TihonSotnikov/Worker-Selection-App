@@ -76,6 +76,12 @@ def test_finish_without_answers_is_rejected(client, fake_llm):
     assert client.post(f"/api/interviews/{interview['id']}/finish").status_code == 409
 
 
+def test_blank_answer_is_rejected(client):
+    interview = client.post("/api/interviews", json={"vacancy_id": 1}).json()
+    assert client.post(f"/api/interviews/{interview['id']}/answer", json={"text": "   "}).status_code == 422
+    assert client.get(f"/api/interviews/{interview['id']}").json()["step"] == 0
+
+
 def test_llm_unavailable_returns_503(client, broken_llm):
     interview = client.post("/api/interviews", json={"vacancy_id": 3}).json()
     client.post(f"/api/interviews/{interview['id']}/answer", json={"text": "Варю аргоном пять лет"})
