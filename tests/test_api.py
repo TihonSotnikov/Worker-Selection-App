@@ -76,6 +76,12 @@ def test_finish_without_answers_is_rejected(client, fake_llm):
     assert client.post(f"/api/interviews/{interview['id']}/finish").status_code == 409
 
 
+def test_blank_answer_is_rejected(client):
+    interview = client.post("/api/interviews", json={"vacancy_id": 1}).json()
+    assert client.post(f"/api/interviews/{interview['id']}/answer", json={"text": "   "}).status_code == 422
+    assert client.get(f"/api/interviews/{interview['id']}").json()["step"] == 0
+
+
 def test_llm_unavailable_returns_503(client, broken_llm):
     interview = client.post("/api/interviews", json={"vacancy_id": 3}).json()
     client.post(f"/api/interviews/{interview['id']}/answer", json={"text": "Варю аргоном пять лет"})
@@ -97,3 +103,15 @@ def test_upload_transcript(client, fake_llm):
 def test_upload_rejects_unsupported_format(client, fake_llm):
     response = client.post("/api/vacancies/4/upload", files={"file": ("cv.pdf", b"%PDF-1.4 ...", "application/pdf")})
     assert response.status_code == 400
+
+
+def test_upload_rejects_broken_audio(app, client, fake_llm, monkeypatch):
+    import av
+
+    def broken(path: str) -> str:
+        raise av.error.InvalidDataError(1094995529, "Invalid data found when processing input")
+
+    monkeypatch.setattr(app.state.transcriber, "transcribe", broken)
+    response = client.post("/api/vacancies/4/upload", files={"file": ("call.mp3", b"not audio", "audio/mpeg")})
+    assert response.status_code == 400
+    assert fake_llm.calls == []

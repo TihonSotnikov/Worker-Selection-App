@@ -5,6 +5,7 @@
 import tempfile
 from pathlib import Path
 
+import av
 from fastapi.concurrency import run_in_threadpool
 
 from app.ai.transcriber import Transcriber
@@ -34,7 +35,10 @@ async def file_to_text(filename: str, content: bytes, transcriber: Transcriber) 
         with tempfile.NamedTemporaryFile(suffix=extension) as tmp:
             tmp.write(content)
             tmp.flush()
-            text = await run_in_threadpool(transcriber.transcribe, tmp.name)
+            try:
+                text = await run_in_threadpool(transcriber.transcribe, tmp.name)
+            except av.error.FFmpegError as e:
+                raise UnsupportedFileError("Не удалось прочитать аудио: файл повреждён или это не аудиозапись") from e
     else:
         supported = ", ".join(sorted(TEXT_EXTENSIONS | AUDIO_EXTENSIONS))
         raise UnsupportedFileError(f"Формат {extension or 'без расширения'} не поддерживается. Можно: {supported}")
