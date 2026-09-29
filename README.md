@@ -3,12 +3,12 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Python-3.11-a8c8f0?style=flat&logo=python&logoColor=white" alt="Python 3.11">
-  <img src="https://img.shields.io/badge/FastAPI-0.135-b8e0d2?style=flat&logo=fastapi&logoColor=white" alt="FastAPI 0.135">
-  <img src="https://img.shields.io/badge/CatBoost-1.2-b8e0d2?style=flat" alt="CatBoost 1.2">
-  <img src="https://img.shields.io/badge/Ollama-qwen3.5:9b-b8e0d2?style=flat&logo=ollama&logoColor=white" alt="Ollama qwen3.5:9b">
-  <img src="https://img.shields.io/badge/faster--whisper-1.2-b8e0d2?style=flat" alt="faster-whisper 1.2">
-  <img src="https://img.shields.io/badge/license-MIT-d4c8f0?style=flat" alt="MIT">
+  <img src="https://img.shields.io/badge/Python-3.11-3776AB?style=flat&logo=python&logoColor=white" alt="Python 3.11">
+  <img src="https://img.shields.io/badge/FastAPI-0.135-009688?style=flat&logo=fastapi&logoColor=white" alt="FastAPI 0.135">
+  <img src="https://img.shields.io/badge/CatBoost-1.2-FFCC00?style=flat" alt="CatBoost 1.2">
+  <img src="https://img.shields.io/badge/Ollama-qwen3.5:9b-000000?style=flat&logo=ollama&logoColor=white" alt="Ollama qwen3.5:9b">
+  <img src="https://img.shields.io/badge/faster--whisper-1.2-412991?style=flat" alt="faster-whisper 1.2">
+  <img src="https://img.shields.io/badge/license-MIT-yellow?style=flat" alt="MIT">
 </p>
 
 <p align="center">
